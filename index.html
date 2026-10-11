@@ -70,6 +70,13 @@ label{display:grid;gap:4px;font-size:13px;color:var(--mut);font-weight:500}
 .jr button{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:6px;min-height:56px}
 .jr button:hover{border-color:var(--ac)}.jr img{width:36px;height:52px;object-fit:cover;border-radius:6px;background:var(--card2)}
 .jr small{color:var(--mut);display:block}.jm{font-size:13px;color:var(--mut);margin-top:6px}
+.gsel{display:grid;gap:6px}.gsel>span{font-size:13px;color:var(--mut);font-weight:500}
+details#gd{background:var(--card);border:1px solid var(--bd);border-radius:12px}
+#gd summary{min-height:44px;padding:10px 12px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}
+#gd summary::-webkit-details-marker{display:none}#gd summary:after{content:"▾";color:var(--mut)}#gd[open] summary:after{content:"▴"}
+.gl{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:4px 8px 10px;max-height:230px;overflow-y:auto;border-top:1px solid var(--bd)}
+.ck{display:flex;align-items:center;gap:8px;color:var(--tx);font-size:14px;min-height:40px;cursor:pointer}
+.ck input{width:20px;height:20px;min-height:0;padding:0;accent-color:var(--ac2);flex:none}
 .sr{position:absolute;left:-9999px}
 </style>
 </head>
@@ -105,7 +112,7 @@ label{display:grid;gap:4px;font-size:13px;color:var(--mut);font-weight:500}
 <dialog id="dlg" aria-labelledby="dt">
 <form class="fm" id="fm">
  <h2 id="dt">Adicionar anime</h2>
- <div class="full"><label for="jq">Buscar no MyAnimeList (Jikan)</label>
+ <div class="full"><label for="jq">Buscar no AniList</label>
   <div class="jk"><input id="jq" type="search" placeholder="Ex.: Frieren"><button type="button" class="btn" id="jb">Buscar</button></div>
   <ul class="jr" id="jr"></ul><div class="jm" id="jm" role="status"></div></div>
  <label class="full">Título<input id="f_title" required maxlength="120"></label>
@@ -116,7 +123,9 @@ label{display:grid;gap:4px;font-size:13px;color:var(--mut);font-weight:500}
  <label>Total de episódios<input id="f_total" type="number" min="0" value="12"></label>
  <label>Data de início<input id="f_start" type="date"></label>
  <label>Data de fim<input id="f_end" type="date"></label>
- <label class="full">Gêneros (separe por vírgula)<input id="f_genres" placeholder="Ação, Drama"></label>
+ <div class="full gsel"><span>Gêneros</span>
+  <details id="gd"><summary id="gsum">Selecionar gêneros</summary><div class="gl" id="gl"></div></details>
+  <input id="f_genres" placeholder="Outros gêneros (separe por vírgula)" aria-label="Gêneros escolhidos ou outros, separados por vírgula"></div>
  <label class="full">Comentário pessoal<textarea id="f_comment"></textarea></label>
  <div class="fa"><button type="button" class="btn" id="cx">Cancelar</button><button class="btn pri">Salvar</button></div>
 </form>
@@ -213,6 +222,7 @@ function openDlg(a){
  editId=a?a.id:null;$('#dt').textContent=a?'Editar anime':'Adicionar anime';
  const d=a||{title:'',cover:'',status:'plan',rating:'',watched:0,total:12,start:'',end:'',genres:[],comment:''};
  F.forEach(k=>$('#f_'+k).value=k==='genres'?d.genres.join(', '):(d[k]||(k==='watched'||k==='total'?0:'')));
+ gsync();$('#gd').open=false;$('#jr').innerHTML='';$('#jm').textContent='';
  $('#dlg').showModal();$('#f_title').focus();
 }
 $('#add').onclick=()=>openDlg();$('#cx').onclick=()=>$('#dlg').close();
@@ -224,29 +234,38 @@ $('#fm').addEventListener('submit',e=>{
  save();$('#dlg').close();render();
 });
 
-/* ===== Busca automática via Jikan (API do MyAnimeList) ===== */
-const GPT={Action:'Ação',Adventure:'Aventura',Comedy:'Comédia',Fantasy:'Fantasia',Horror:'Terror',Mystery:'Mistério','Sci-Fi':'Ficção científica','Slice of Life':'Cotidiano',Sports:'Esportes',Supernatural:'Sobrenatural'};
+/* ===== Lista suspensa de gêneros (sincronizada com o campo de texto) ===== */
+const GEN=['Ação','Aventura','Comédia','Drama','Fantasia','Ficção científica','Terror','Mistério','Romance','Cotidiano','Esportes','Sobrenatural','Psicológico','Suspense','Garota mágica','Música','Mecha','Histórico','Escolar','Shounen','Seinen','Isekai','Ecchi'];
+$('#gl').innerHTML=GEN.map(g=>`<label class="ck"><input type="checkbox" value="${g}">${g}</label>`).join('');
+const gget=()=>$('#f_genres').value.split(',').map(x=>x.trim()).filter(Boolean);
+function gsync(){const l=gget().map(x=>x.toLowerCase());document.querySelectorAll('#gl input').forEach(c=>c.checked=l.includes(c.value.toLowerCase()));$('#gsum').textContent=l.length?l.length+' selecionado(s)':'Selecionar gêneros'}
+$('#gl').addEventListener('change',e=>{const c=e.target,l=gget().filter(x=>x.toLowerCase()!==c.value.toLowerCase());if(c.checked)l.push(c.value);$('#f_genres').value=l.join(', ');gsync()});
+$('#f_genres').addEventListener('input',gsync);
+
+/* ===== Busca automática via AniList (GraphQL, sem chave) ===== */
+const GPT={Action:'Ação',Adventure:'Aventura',Comedy:'Comédia',Fantasy:'Fantasia',Horror:'Terror',Mystery:'Mistério','Sci-Fi':'Ficção científica','Slice of Life':'Cotidiano',Sports:'Esportes',Supernatural:'Sobrenatural',Psychological:'Psicológico',Thriller:'Suspense','Mahou Shoujo':'Garota mágica',Music:'Música'};
+const GQL='query($q:String){Page(perPage:6){media(search:$q,type:ANIME,sort:SEARCH_MATCH){id title{romaji english} coverImage{large medium} episodes seasonYear genres}}}';
 let jres=[];
 async function jikan(){
  const q=$('#jq').value.trim(),m=$('#jm'),ul=$('#jr');if(!q)return;
  ul.innerHTML='';m.textContent='Buscando…';
  try{
-  const r=await fetch('https://api.jikan.moe/v4/anime?sfw=true&limit=6&q='+encodeURIComponent(q));
+  const r=await fetch('https://graphql.anilist.co',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({query:GQL,variables:{q}})});
   if(!r.ok)throw new Error(r.status);
-  jres=(await r.json()).data||[];
+  jres=(await r.json()).data?.Page?.media||[];
   m.textContent=jres.length?'':'Nenhum resultado.';
-  ul.innerHTML=jres.map((a,i)=>`<li><button type="button" data-i="${i}"><img src="${esc(a.images?.jpg?.image_url)}" alt=""><span>${esc(a.title_english||a.title)}<small>${a.year||'—'} · ${a.episodes||'?'} ep</small></span></button></li>`).join('');
- }catch(e){const st=Number(e.message);m.textContent=st===429?'O Jikan limitou as buscas. Aguarde alguns segundos e tente de novo.':st?'O Jikan respondeu com erro '+st+'. Tente novamente em instantes.':'Sem conexão com o Jikan ('+(e.message||e.name)+'). Se o endereço da página começa com content://, abra o arquivo por file:///… ou hospede-o em um site.'}
+  ul.innerHTML=jres.map((a,i)=>`<li><button type="button" data-i="${i}"><img src="${esc(a.coverImage?.medium)}" alt=""><span>${esc(a.title.english||a.title.romaji)}<small>${a.seasonYear||'—'} · ${a.episodes||'?'} ep</small></span></button></li>`).join('');
+ }catch(e){const st=Number(e.message);m.textContent=st===429?'Muitas buscas seguidas. Aguarde alguns segundos e tente de novo.':st?'O AniList respondeu com erro '+st+'. Tente novamente em instantes.':'Sem conexão com o AniList ('+(e.message||e.name)+'). Abra o site por https:// (ex.: GitHub Pages).'}
 }
 $('#jb').onclick=jikan;
 $('#jq').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();jikan()}});
 $('#jr').addEventListener('click',e=>{
  const b=e.target.closest('[data-i]');if(!b)return;const a=jres[+b.dataset.i];
- $('#f_title').value=a.title_english||a.title;
- $('#f_cover').value=a.images?.jpg?.large_image_url||a.images?.jpg?.image_url||'';
+ $('#f_title').value=a.title.english||a.title.romaji;
+ $('#f_cover').value=a.coverImage?.large||a.coverImage?.medium||'';
  $('#f_total').value=a.episodes||0;
- $('#f_genres').value=(a.genres||[]).map(g=>GPT[g.name]||g.name).join(', ');
- $('#jr').innerHTML='';$('#jm').textContent='Dados preenchidos. Ajuste o que quiser e salve.';
+ $('#f_genres').value=(a.genres||[]).map(g=>GPT[g]||g).join(', ');
+ gsync();$('#jr').innerHTML='';$('#jm').textContent='Dados preenchidos. Ajuste o que quiser e salve.';
 });
 
 /* ===== Exportar / importar JSON ===== */
