@@ -77,6 +77,8 @@ details#gd{background:var(--card);border:1px solid var(--bd);border-radius:12px}
 .gl{display:grid;grid-template-columns:1fr 1fr;gap:2px;padding:4px 8px 10px;max-height:230px;overflow-y:auto;border-top:1px solid var(--bd)}
 .ck{display:flex;align-items:center;gap:8px;color:var(--tx);font-size:14px;min-height:40px;cursor:pointer}
 .ck input{width:20px;height:20px;min-height:0;padding:0;accent-color:var(--ac2);flex:none}
+.am{padding:18px;display:grid;gap:12px}.am p{margin:0;color:var(--mut);font-size:13px}.am .er{color:var(--bad);min-height:18px}
+dialog#ad{width:min(420px,100%)}
 .sr{position:absolute;left:-9999px}
 </style>
 </head>
@@ -85,11 +87,13 @@ details#gd{background:var(--card);border:1px solid var(--bd);border-radius:12px}
 <header>
  <h1>Anime<span>Tracker</span></h1>
  <button class="btn" id="th" aria-label="Alternar tema">🌓</button>
+ <button class="btn" id="cl" hidden>☁ Entrar</button>
  <button class="btn" id="ex">Exportar</button>
  <button class="btn" id="im">Importar</button>
  <input type="file" id="fi" accept=".json" class="sr" aria-label="Arquivo JSON">
  <button class="btn pri" id="add">+ Adicionar</button>
 </header>
+<div id="cs" class="cm" style="margin:-6px 0 10px" role="status"></div>
 <div class="tabs" role="tablist">
  <button class="btn" role="tab" id="t1" aria-selected="true">Biblioteca</button>
  <button class="btn" role="tab" id="t2" aria-selected="false">Estatísticas</button>
@@ -131,6 +135,20 @@ details#gd{background:var(--card);border:1px solid var(--bd);border-radius:12px}
 </form>
 </dialog>
 
+<dialog id="ad" aria-labelledby="at">
+<form class="am" id="af">
+ <h2 id="at">Entrar na nuvem</h2>
+ <p>Entre com o mesmo e-mail em todos os seus aparelhos para sincronizar a lista.</p>
+ <label>E-mail<input id="ae" type="email" required autocomplete="email"></label>
+ <label>Senha (mínimo 6 caracteres)<input id="ap" type="password" required minlength="6" autocomplete="current-password"></label>
+ <div class="er" id="aer" role="alert"></div>
+ <div class="fa"><button type="button" class="btn" id="acx">Cancelar</button><button type="button" class="btn" id="asu">Criar conta</button><button class="btn pri">Entrar</button></div>
+</form>
+</dialog>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 /* ===== Dados e persistência (localStorage com fallback em memória) ===== */
 const KEY='animeTracker.v1', ST={watching:'Assistindo',done:'Concluído',plan:'Planejo assistir',hold:'Pausado',drop:'Abandonado'};
@@ -138,7 +156,7 @@ let mem=null, items=[], view='grid', editId=null;
 const today=()=>new Date().toISOString().slice(0,10);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 function load(){try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r)}catch(e){}return mem}
-function save(){mem=items;try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){}}
+function save(){mem=items;try{localStorage.setItem(KEY,JSON.stringify(items))}catch(e){}cloudPush()}
 function sample(){const m=(title,status,w,t,r,g,fav,c,e)=>({id:uid(),title,cover:'',status,watched:w,total:t,rating:r,start:'2025-01-10',end:e||'',genres:g,comment:c,fav,added:Date.now()-Math.random()*1e9});
 return[m('Fullmetal Alchemist: Brotherhood','done',64,64,10,['Ação','Aventura','Drama'],true,'Obra-prima absoluta.','2025-03-02'),
 m('Frieren','done',28,28,9.5,['Fantasia','Drama'],true,'Lindo e melancólico.','2025-06-15'),
@@ -273,9 +291,52 @@ $('#ex').onclick=()=>{const u=URL.createObjectURL(new Blob([JSON.stringify(items
 $('#im').onclick=()=>$('#fi').click();
 $('#fi').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d))throw 0;items=d.filter(a=>a&&a.title).map(a=>({id:uid(),fav:false,added:Date.now(),status:'plan',watched:0,total:0,rating:0,genres:[],comment:'',cover:'',start:'',end:'',...a,status:ST[a.status]?a.status:'plan'}));save();render()}catch(x){alert('Arquivo JSON inválido.')}};r.readAsText(f);e.target.value=''};
 
+/* ===== Sincronização na nuvem (Firebase: login + Firestore) ===== */
+/* Cole aqui a configuração do seu projeto Firebase (Configurações do projeto > Seus apps > Web). */
+var FB_CONFIG={apiKey:"AIzaSyBT7Gy2qtEXWx83tW1y_zOJLGfU7ycQTh8",authDomain:"anime-tracker-13161.firebaseapp.com",projectId:"anime-tracker-13161",storageBucket:"anime-tracker-13161.firebasestorage.app",messagingSenderId:"1086665060525",appId:"1:1086665060525:web:66fc19ec5646972c819624"};
+var cloudUid=null,cloudUnsub=null,cloudTimer=null,cloudRef=null,cloudAuth=null;
+function cloudStatus(t){$('#cs').textContent=t}
+function cloudPush(){
+ if(!cloudUid||!cloudRef)return;
+ clearTimeout(cloudTimer);cloudStatus('☁ Salvando…');
+ cloudTimer=setTimeout(()=>cloudRef.set({items:JSON.stringify(items),updated:Date.now()}).then(()=>cloudStatus('☁ Sincronizado')).catch(e=>cloudStatus('☁ Erro ao salvar: '+(e.code||e.message))),600);
+}
+const AERR={'auth/invalid-credential':'E-mail ou senha incorretos.','auth/wrong-password':'E-mail ou senha incorretos.','auth/user-not-found':'E-mail ou senha incorretos.','auth/email-already-in-use':'Este e-mail já tem conta. Toque em Entrar.','auth/weak-password':'A senha precisa ter pelo menos 6 caracteres.','auth/invalid-email':'E-mail inválido.','auth/network-request-failed':'Sem conexão com a internet.','auth/too-many-requests':'Muitas tentativas. Aguarde um pouco.'};
+function cloudInit(){
+ if(!FB_CONFIG.apiKey||!window.firebase)return;
+ $('#cl').hidden=false;
+ firebase.initializeApp(FB_CONFIG);cloudAuth=firebase.auth();const db=firebase.firestore();
+ cloudAuth.onAuthStateChanged(u=>{
+  if(cloudUnsub){cloudUnsub();cloudUnsub=null}
+  cloudUid=u?u.uid:null;cloudRef=null;
+  $('#cl').textContent=u?'☁ '+(u.email||'').split('@')[0]:'☁ Entrar';
+  if(!u){cloudStatus('');return}
+  cloudRef=db.collection('users').doc(u.uid);cloudStatus('☁ Conectando…');
+  cloudUnsub=cloudRef.onSnapshot(snap=>{
+   if(snap.metadata.hasPendingWrites)return;
+   if(!snap.exists){cloudPush();return}            /* primeira vez: envia a lista local */
+   try{const r=JSON.parse(snap.data().items);
+    if(JSON.stringify(r)!==JSON.stringify(items)){items=r;mem=r;try{localStorage.setItem(KEY,JSON.stringify(r))}catch(e){}render()}
+    cloudStatus('☁ Sincronizado')}catch(e){cloudStatus('☁ Dados da nuvem inválidos')}
+  },e=>cloudStatus('☁ Erro: '+(e.code||e.message)));
+ });
+}
+$('#cl').onclick=()=>{
+ if(cloudUid){if(confirm('Sair da conta? Seus dados continuam salvos na nuvem.'))cloudAuth.signOut();return}
+ $('#aer').textContent='';$('#ad').showModal();$('#ae').focus();
+};
+$('#acx').onclick=()=>$('#ad').close();
+async function authGo(create){
+ const e=$('#ae').value.trim(),p=$('#ap').value;$('#aer').textContent='Aguarde…';
+ try{await (create?cloudAuth.createUserWithEmailAndPassword(e,p):cloudAuth.signInWithEmailAndPassword(e,p));$('#ad').close();$('#ap').value=''}
+ catch(x){$('#aer').textContent=AERR[x.code]||('Erro: '+(x.code||x.message))}
+}
+$('#af').addEventListener('submit',e=>{e.preventDefault();authGo(false)});
+$('#asu').onclick=()=>{if($('#af').reportValidity())authGo(true)};
+
 /* ===== Tema ===== */
 $('#th').onclick=()=>{const r=document.documentElement,dark=r.dataset.theme?r.dataset.theme==='dark':!matchMedia('(prefers-color-scheme: light)').matches;r.dataset.theme=dark?'light':'dark'};
-render();
+render();cloudInit();
 </script>
 </body>
 </html>
